@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from typing import Any
 
 from templi.cli.printer import print_warning
@@ -16,7 +17,37 @@ from templi.core.template_engine import render_templates_directory
 from templi.hooks.edit_file import execute_edit_hook
 from templi.hooks.render_templates import execute_render_templates_hook
 from templi.hooks.run_command import execute_run_hook
-from templi.hooks.run_script import execute_run_script_hook
+from templi.hooks.run_script import ScriptHookResult, execute_run_script_hook
+
+
+@dataclass
+class _VariableState:
+    """Estado mutável das 4 categorias + view achatada (`all_variables`).
+
+    Scripts run-script podem alterar quaisquer das 4 categorias; chamamos
+    `apply_script_mutations` para reaplicar a mutação no `all_variables`
+    (usado por hooks/templates subsequentes) e no namespace `global_inputs`.
+    """
+
+    inputs: dict[str, Any] = field(default_factory=dict)
+    global_inputs: dict[str, Any] = field(default_factory=dict)
+    computed_inputs: dict[str, Any] = field(default_factory=dict)
+    global_computed_inputs: dict[str, Any] = field(default_factory=dict)
+    all_variables: dict[str, Any] = field(default_factory=dict)
+
+    def apply_script_mutations(self, result: ScriptHookResult) -> None:
+        self.inputs.update(result.inputs)
+        self.global_inputs.update(result.global_inputs)
+        self.computed_inputs.update(result.computed_inputs)
+        self.global_computed_inputs.update(result.global_computed_inputs)
+
+        # all_variables é uma view achatada com prioridade: inputs <
+        # global_inputs < computed < global_computed (mesma ordem do resolver).
+        self.all_variables.update(result.inputs)
+        self.all_variables.update(result.global_inputs)
+        self.all_variables.update(result.computed_inputs)
+        self.all_variables.update(result.global_computed_inputs)
+        self.all_variables["global_inputs"] = self.global_inputs
 
 
 def apply_plugin(
@@ -37,7 +68,8 @@ def apply_plugin(
     7. Atualiza manifesto local
 
     Returns:
-        Dict com todas as variáveis (inputs + computeds).
+        Dict com todas as variáveis (inputs + computeds), incluindo mutações
+        feitas por hooks run-script.
     """
     cli_inputs = cli_inputs or {}
     project_dir = os.path.abspath(project_dir)
@@ -51,12 +83,12 @@ def apply_plugin(
         is_non_interactive=is_non_interactive,
     )
 
-    # All --key value args (declared or not) are available in templates,
-    # preserving CLI precedence. Layering: previous globals < CLI args < declared inputs.
+    # Layering: previous globals < CLI args < declared inputs.
     merged_variables = {**previous_globals, **cli_inputs, **collected_inputs}
-    merged_variables["global_inputs"] = _build_global_inputs(
+    global_inputs_namespace = _build_global_inputs(
         plugin.spec.inputs, merged_variables,
     )
+    merged_variables["global_inputs"] = global_inputs_namespace
 
     all_variables = resolve_computed_inputs(
         computed_inputs=plugin.spec.computed_inputs,
@@ -64,42 +96,54 @@ def apply_plugin(
         variables=merged_variables,
     )
 
+    state = _VariableState(
+        inputs=dict(collected_inputs),
+        global_inputs=global_inputs_namespace,
+        computed_inputs={
+            key: all_variables[key]
+            for key in plugin.spec.computed_inputs
+            if key in all_variables
+        },
+        global_computed_inputs={
+            key: all_variables[key]
+            for key in plugin.spec.global_computed_inputs
+            if key in all_variables
+        },
+        all_variables=all_variables,
+    )
+
     _execute_hooks_by_trigger(
         hooks=plugin.spec.hooks,
         trigger="before-render",
         plugin=plugin,
         project_dir=project_dir,
-        variables=all_variables,
+        state=state,
     )
 
     templates_dir = os.path.join(plugin.source_directory, "templates")
     if os.path.isdir(templates_dir):
-        render_templates_directory(templates_dir, project_dir, all_variables)
+        render_templates_directory(templates_dir, project_dir, state.all_variables)
 
     _execute_hooks_by_trigger(
         hooks=plugin.spec.hooks,
         trigger="after-render",
         plugin=plugin,
         project_dir=project_dir,
-        variables=all_variables,
+        state=state,
     )
 
-    new_global_inputs = _build_global_inputs(plugin.spec.inputs, collected_inputs)
-    new_global_computed = _extract_global_computed(
-        plugin.spec.global_computed_inputs, all_variables,
-    )
     manifest_inputs = {
-        key: value for key, value in collected_inputs.items()
+        key: value for key, value in state.inputs.items()
         if key != "global_inputs"
     }
 
     update_manifest(
         project_dir, plugin, manifest_inputs,
-        global_inputs=new_global_inputs,
-        global_computed_inputs=new_global_computed,
+        global_inputs=state.global_inputs,
+        global_computed_inputs=state.global_computed_inputs,
     )
 
-    return all_variables
+    return state.all_variables
 
 
 def _execute_hooks_by_trigger(
@@ -107,22 +151,22 @@ def _execute_hooks_by_trigger(
     trigger: str,
     plugin: Plugin,
     project_dir: str,
-    variables: dict,
+    state: _VariableState,
 ) -> None:
     """Executa todos os hooks com o trigger especificado, respeitando condições."""
     for hook in hooks:
         if hook.trigger != trigger:
             continue
-        if not evaluate_condition(hook.condition, variables):
+        if not evaluate_condition(hook.condition, state.all_variables):
             continue
-        _execute_single_hook(hook, plugin, project_dir, variables)
+        _execute_single_hook(hook, plugin, project_dir, state)
 
 
 def _execute_single_hook(
     hook: Hook,
     plugin: Plugin,
     project_dir: str,
-    variables: dict,
+    state: _VariableState,
 ) -> None:
     """Executa um único hook baseado no tipo."""
     if hook.type == "render-templates" and hook.path:
@@ -130,7 +174,7 @@ def _execute_single_hook(
             hook_path=hook.path,
             plugin_source_dir=plugin.source_directory,
             project_dir=project_dir,
-            variables=variables,
+            variables=state.all_variables,
         )
         return
 
@@ -140,24 +184,29 @@ def _execute_single_hook(
             changes=hook.changes,
             plugin_source_dir=plugin.source_directory,
             project_dir=project_dir,
-            variables=variables,
+            variables=state.all_variables,
         )
         return
 
     if hook.type == "run-script" and hook.script:
-        execute_run_script_hook(
+        result = execute_run_script_hook(
             script_path=hook.script,
             plugin_source_dir=plugin.source_directory,
             project_dir=project_dir,
-            variables=variables,
+            variables=state.all_variables,
+            inputs=state.inputs,
+            global_inputs=state.global_inputs,
+            computed_inputs=state.computed_inputs,
+            global_computed_inputs=state.global_computed_inputs,
         )
+        state.apply_script_mutations(result)
         return
 
     if hook.type == "run" and hook.commands:
         execute_run_hook(
             commands=hook.commands,
             project_dir=project_dir,
-            variables=variables,
+            variables=state.all_variables,
         )
         return
 
@@ -174,15 +223,3 @@ def _build_global_inputs(
         if plugin_input.global_input and plugin_input.name in collected:
             global_inputs[plugin_input.name] = collected[plugin_input.name]
     return global_inputs
-
-
-def _extract_global_computed(
-    global_computed_spec: dict[str, str],
-    all_variables: dict[str, Any],
-) -> dict[str, Any]:
-    """Extrai valores resolvidos dos global-computed-inputs para persistir no manifesto."""
-    result: dict[str, Any] = {}
-    for key in global_computed_spec:
-        if key in all_variables:
-            result[key] = all_variables[key]
-    return result
