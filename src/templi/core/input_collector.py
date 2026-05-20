@@ -14,6 +14,7 @@ def collect_inputs(
     cli_values: dict[str, str],
     is_non_interactive: bool,
     collected_so_far: dict[str, Any] | None = None,
+    inherited_globals: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Coleta todos os inputs, respeitando ordem, condições e modo.
@@ -57,6 +58,8 @@ def collect_inputs(
 
         if cli_value is not None:
             value = _normalize_value(plugin_input, cli_value)
+        elif plugin_input.global_input and inherited_globals and plugin_input.name in inherited_globals:
+            value = inherited_globals[plugin_input.name]
         elif is_non_interactive:
             if plugin_input.default is not None:
                 if isinstance(plugin_input.default, list) and plugin_input.type == "multiselect":

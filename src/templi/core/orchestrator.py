@@ -81,6 +81,7 @@ def apply_plugin(
         inputs=plugin.spec.inputs,
         cli_values=cli_inputs,
         is_non_interactive=is_non_interactive,
+        inherited_globals=previous_globals,
     )
 
     # Layering: previous globals < CLI args < declared inputs.
