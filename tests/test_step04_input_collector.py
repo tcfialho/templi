@@ -234,3 +234,110 @@ class TestOptionalInput:
         ]
         result = collect_inputs(inputs, {}, is_non_interactive=True)
         assert "repository_url" not in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Inherited globals (vindos do manifesto local)  
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestInheritedGlobals:
+    def test_inherited_global_satisfies_required(self):
+        """Required + global=true sem CLI mas com inherited deve resolver."""
+        inputs = [
+            PluginInput(label="Solução", name="solution_name", type="text",
+                        required=True, global_input=True),
+        ]
+        result = collect_inputs(
+            inputs, {}, is_non_interactive=True,
+            inherited_globals={"solution_name": "MeuCarro"},
+        )
+        assert result["solution_name"] == "MeuCarro"
+
+    def test_cli_overrides_inherited_global(self):
+        """CLI explícito tem precedência sobre inherited do manifesto."""
+        inputs = [
+            PluginInput(label="Solução", name="solution_name", type="text",
+                        required=True, global_input=True),
+        ]
+        result = collect_inputs(
+            inputs, {"solution_name": "NovoValor"}, is_non_interactive=True,
+            inherited_globals={"solution_name": "ValorAntigo"},
+        )
+        assert result["solution_name"] == "NovoValor"
+
+    def test_inherited_ignored_for_non_global_input(self):
+        """Input local (global=false) não consome valores herdados; cai no default."""
+        inputs = [
+            PluginInput(label="Classname", name="classname", type="text",
+                        required=True, global_input=False, default="Veiculo"),
+        ]
+        result = collect_inputs(
+            inputs, {}, is_non_interactive=True,
+            inherited_globals={"classname": "InvasorIndevido"},
+        )
+        assert result["classname"] == "Veiculo"
+
+    def test_inherited_required_non_global_still_raises(self):
+        """Required sem default e sem CLI, mesmo com inherited (mas global=false), falha."""
+        inputs = [
+            PluginInput(label="Classname", name="classname", type="text",
+                        required=True, global_input=False),
+        ]
+        with pytest.raises(ValueError, match="obrigatório"):
+            collect_inputs(
+                inputs, {}, is_non_interactive=True,
+                inherited_globals={"classname": "Algo"},
+            )
+
+    def test_inherited_preserves_list_type(self):
+        """Multiselect com lista python (vinda do manifesto) é preservada — não re-parseada."""
+        inputs = [
+            PluginInput(label="Operações", name="operations", type="multiselect",
+                        required=True, global_input=True,
+                        items=["Inserir (POST)", "Obter (GET)", "Alterar (PUT)"]),
+        ]
+        inherited = {"operations": ["Inserir (POST)", "Obter (GET)"]}
+        result = collect_inputs(
+            inputs, {}, is_non_interactive=True,
+            inherited_globals=inherited,
+        )
+        assert result["operations"] == ["Inserir (POST)", "Obter (GET)"]
+
+    def test_inherited_preserves_bool_type(self):
+        """Bool python (vindo do manifesto) é preservado — sem .lower() em bool."""
+        inputs = [
+            PluginInput(label="Debug?", name="debug", type="bool",
+                        required=True, global_input=True),
+        ]
+        result = collect_inputs(
+            inputs, {}, is_non_interactive=True,
+            inherited_globals={"debug": True},
+        )
+        assert result["debug"] is True
+
+    def test_inherited_global_pattern_still_validates(self):
+        """Validação de pattern continua acontecendo mesmo via inherited."""
+        inputs = [
+            PluginInput(
+                label="Nome", name="project_name", type="text",
+                required=True, global_input=True,
+                pattern="^[a-z][a-z0-9-]*$",
+            ),
+        ]
+        with pytest.raises(ValueError, match="padrão"):
+            collect_inputs(
+                inputs, {}, is_non_interactive=True,
+                inherited_globals={"project_name": "INVALIDO_COM_MAIUSCULA"},
+            )
+
+    def test_default_beats_inherited_for_non_global(self):
+        """Sanity: input global=false com default usa o default, não o inherited."""
+        inputs = [
+            PluginInput(label="Versão", name="plugin_version", type="text",
+                        required=True, global_input=False, default="0.0.1"),
+        ]
+        result = collect_inputs(
+            inputs, {}, is_non_interactive=True,
+            inherited_globals={"plugin_version": "9.9.9"},
+        )
+        assert result["plugin_version"] == "0.0.1"

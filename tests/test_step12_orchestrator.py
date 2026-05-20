@@ -297,3 +297,64 @@ class TestPluginGeneratorLikePipeline:
         gen_plugin_yaml = open(os.path.join(generated_dir, "plugin.yaml"), encoding="utf-8").read()
         assert "plugin-teste" in gen_plugin_yaml
         assert "Plugin de teste" in gen_plugin_yaml
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CA-12.6: Reaproveitamento de global-inputs do manifesto entre plugins
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestInheritedGlobalsBetweenPlugins:
+    def _create_plugin_with_global(self, base_dir, name, needs_solution=True):
+        plugin_dir = os.path.join(str(base_dir), name)
+        os.makedirs(plugin_dir)
+
+        inputs_yaml = f"""
+    - label: Solução
+      name: solution_name
+      type: text
+      required: true
+      global: true
+""" if needs_solution else ""
+
+        plugin_yaml = f"""schema-version: v3
+kind: plugin
+metadata:
+  name: {name}
+  display-name: {name}
+  description: Test plugin
+  version: 1.0.0
+spec:
+  type: app
+  inputs:{inputs_yaml}
+  hooks: []
+"""
+        write_file(os.path.join(plugin_dir, "plugin.yaml"), plugin_yaml)
+        return plugin_dir
+
+    def test_second_plugin_reuses_global_from_manifest(self, tmp_path):
+        project_dir = os.path.join(str(tmp_path), "project")
+        os.makedirs(project_dir)
+
+        plugin_a = self._create_plugin_with_global(tmp_path, "plugin-a")
+        plugin_b = self._create_plugin_with_global(tmp_path, "plugin-b")
+
+        apply_plugin(
+            plugin_dir=plugin_a,
+            project_dir=project_dir,
+            cli_inputs={"solution_name": "MinhaSolucao"},
+            is_non_interactive=True,
+        )
+
+        manifest = os.path.join(project_dir, ".templi", "manifest.yaml")
+        assert os.path.isfile(manifest)
+        manifest_data = yaml.safe_load(open(manifest, encoding="utf-8").read())
+        assert manifest_data["global-inputs"]["solution_name"] == "MinhaSolucao"
+
+        result = apply_plugin(
+            plugin_dir=plugin_b,
+            project_dir=project_dir,
+            cli_inputs={},
+            is_non_interactive=True,
+        )
+
+        assert result["solution_name"] == "MinhaSolucao"
