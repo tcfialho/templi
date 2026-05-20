@@ -4,8 +4,9 @@ import os
 import yaml
 import pytest
 
-from templi.core.manifest_manager import update_manifest
+from templi.core.manifest_manager import load_global_inputs, update_manifest
 from templi.core.models import Plugin, PluginMetadata, PluginSpec
+from templi.core.runtime_config import COMPAT_NAME_ENV
 
 
 def _make_plugin(name="test-plugin", version="1.0.0") -> Plugin:
@@ -23,6 +24,37 @@ class TestCreateManifest:
         update_manifest(str(tmp_path), _make_plugin(), {})
         assert (tmp_path / ".templi").is_dir()
         assert (tmp_path / ".templi" / "manifest.yaml").exists()
+
+    def test_uses_compat_manifest_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+
+        path = update_manifest(str(tmp_path), _make_plugin(), {})
+
+        assert path == os.path.join(str(tmp_path), ".customtool", "manifest.yaml")
+        assert (tmp_path / ".customtool" / "manifest.yaml").exists()
+        assert not (tmp_path / ".templi").exists()
+
+    def test_loads_globals_from_compat_manifest_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+
+        update_manifest(
+            str(tmp_path),
+            _make_plugin(),
+            {},
+            global_inputs={"ecosystem": "nodejs"},
+            global_computed_inputs={"service_name": "api"},
+        )
+
+        assert load_global_inputs(str(tmp_path)) == {
+            "ecosystem": "nodejs",
+            "service_name": "api",
+        }
+
+    def test_rejects_invalid_compat_name(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "custom-tool")
+
+        with pytest.raises(ValueError, match=COMPAT_NAME_ENV):
+            update_manifest(str(tmp_path), _make_plugin(), {})
 
     def test_manifest_has_applied_plugins(self, tmp_path):
         update_manifest(str(tmp_path), _make_plugin(), {"name": "value"})

@@ -6,7 +6,42 @@ import pytest
 from templi.hooks.render_templates import execute_render_templates_hook
 from templi.hooks.edit_file import execute_edit_hook
 from templi.hooks.run_command import execute_run_hook
+from templi.hooks.run_script import _build_environment
 from templi.core.models import HookChange
+from templi.core.runtime_config import COMPAT_NAME_ENV
+
+
+class TestRunScriptEnvironment:
+    def test_uses_default_templi_env_prefix(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(COMPAT_NAME_ENV, raising=False)
+
+        plugin_dir = tmp_path / "plugin"
+        project_dir = tmp_path / "project"
+
+        env = _build_environment(
+            str(plugin_dir),
+            str(project_dir),
+            {"debug": True},
+        )
+
+        assert env["TEMPLI_PLUGIN_DIR"] == os.path.abspath(str(plugin_dir))
+        assert env["TEMPLI_PROJECT_DIR"] == os.path.abspath(str(project_dir))
+        assert env["DEBUG"] == "true"
+
+    def test_uses_compat_env_prefix(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+        monkeypatch.setenv("TEMPLI_PLUGIN_DIR", "stale-plugin")
+        monkeypatch.setenv("TEMPLI_PROJECT_DIR", "stale-project")
+
+        plugin_dir = tmp_path / "plugin"
+        project_dir = tmp_path / "project"
+
+        env = _build_environment(str(plugin_dir), str(project_dir), {})
+
+        assert env["CUSTOMTOOL_PLUGIN_DIR"] == os.path.abspath(str(plugin_dir))
+        assert env["CUSTOMTOOL_PROJECT_DIR"] == os.path.abspath(str(project_dir))
+        assert "TEMPLI_PLUGIN_DIR" not in env
+        assert "TEMPLI_PROJECT_DIR" not in env
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
