@@ -6,7 +6,7 @@ import pytest
 from templi.hooks.render_templates import execute_render_templates_hook
 from templi.hooks.edit_file import execute_edit_hook
 from templi.hooks.run_command import execute_run_hook
-from templi.hooks.run_script import _build_environment
+from templi.hooks.run_script import _build_environment, execute_run_script_hook
 from templi.core.models import HookChange
 from templi.core.runtime_config import COMPAT_NAME_ENV
 
@@ -42,6 +42,144 @@ class TestRunScriptEnvironment:
         assert env["CUSTOMTOOL_PROJECT_DIR"] == os.path.abspath(str(project_dir))
         assert "TEMPLI_PLUGIN_DIR" not in env
         assert "TEMPLI_PROJECT_DIR" not in env
+
+    def test_metadata_mock_exposes_global_computed_inputs(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        scripts_dir = plugin_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        script_file = scripts_dir / "uses_global_computed_inputs.py"
+        script_file.write_text(
+            "\n".join([
+                "def run(metadata):",
+                "    metadata.global_computed_inputs.pop('entrypoint', None)",
+                "    metadata.global_computed_inputs['entrypoint'] = 'Sample.Api'",
+            ]),
+            encoding="utf-8",
+        )
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        result = execute_run_script_hook(
+            script_path="./scripts/uses_global_computed_inputs.py",
+            plugin_source_dir=str(plugin_dir),
+            project_dir=str(project_dir),
+            variables={},
+            global_computed_inputs={"entrypoint": "OldValue"},
+        )
+
+        assert result.exit_code == 0
+        assert result.global_computed_inputs["entrypoint"] == "Sample.Api"
+
+    def test_metadata_mock_exposes_all_categories_and_all_inputs(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        scripts_dir = plugin_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        script_file = scripts_dir / "reads_all.py"
+        script_file.write_text(
+            "\n".join([
+                "import json, os",
+                "def run(metadata):",
+                "    snapshot = {",
+                "        'inputs': dict(metadata.inputs),",
+                "        'global_inputs': dict(metadata.global_inputs),",
+                "        'computed_inputs': dict(metadata.computed_inputs),",
+                "        'global_computed_inputs': dict(metadata.global_computed_inputs),",
+                "        'all_inputs': metadata.all_inputs(),",
+                "        'target_path': metadata.target_path,",
+                "    }",
+                "    out = os.path.join(metadata.target_path, 'snapshot.json')",
+                "    with open(out, 'w', encoding='utf-8') as fh:",
+                "        json.dump(snapshot, fh)",
+            ]),
+            encoding="utf-8",
+        )
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        result = execute_run_script_hook(
+            script_path="./scripts/reads_all.py",
+            plugin_source_dir=str(plugin_dir),
+            project_dir=str(project_dir),
+            variables={},
+            inputs={"name": "kafka"},
+            global_inputs={"solution_name": "Sample"},
+            computed_inputs={"filename": "kafka"},
+            global_computed_inputs={"plugin_applied": "-kafka"},
+        )
+
+        assert result.exit_code == 0
+
+        import json as _json
+        snapshot = _json.loads((project_dir / "snapshot.json").read_text(encoding="utf-8"))
+        assert snapshot["inputs"] == {"name": "kafka"}
+        assert snapshot["global_inputs"] == {"solution_name": "Sample"}
+        assert snapshot["computed_inputs"] == {"filename": "kafka"}
+        assert snapshot["global_computed_inputs"] == {"plugin_applied": "-kafka"}
+        assert snapshot["all_inputs"] == {
+            "name": "kafka",
+            "solution_name": "Sample",
+            "filename": "kafka",
+            "plugin_applied": "-kafka",
+        }
+        assert snapshot["target_path"] == os.path.abspath(str(project_dir))
+
+    def test_metadata_mutations_propagate_to_inputs_and_globals(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        scripts_dir = plugin_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        script_file = scripts_dir / "mutates.py"
+        script_file.write_text(
+            "\n".join([
+                "def run(metadata):",
+                "    metadata.inputs['pathInfrastructure'] = 'src/Sample.Infrastructure'",
+                "    metadata.global_inputs.pop('entrypoint', None)",
+                "    metadata.global_computed_inputs.pop('entrypoint', None)",
+                "    metadata.global_computed_inputs['entrypoint'] = 'Sample.Api'",
+                "    metadata.global_computed_inputs['repositorypath'] = '/src/x.csproj'",
+            ]),
+            encoding="utf-8",
+        )
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        result = execute_run_script_hook(
+            script_path="./scripts/mutates.py",
+            plugin_source_dir=str(plugin_dir),
+            project_dir=str(project_dir),
+            variables={},
+            inputs={"name": "kafka"},
+            global_inputs={"entrypoint": "OldEntry"},
+            global_computed_inputs={"entrypoint": "OldEntry"},
+        )
+
+        assert result.exit_code == 0
+        assert result.inputs["pathInfrastructure"] == "src/Sample.Infrastructure"
+        assert result.inputs["name"] == "kafka"
+        assert "entrypoint" not in result.global_inputs
+        assert result.global_computed_inputs["entrypoint"] == "Sample.Api"
+        assert result.global_computed_inputs["repositorypath"] == "/src/x.csproj"
+
+    def test_metadata_missing_script_returns_initial_state(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        result = execute_run_script_hook(
+            script_path="./scripts/inexistente.py",
+            plugin_source_dir=str(plugin_dir),
+            project_dir=str(project_dir),
+            variables={},
+            inputs={"name": "kafka"},
+            global_computed_inputs={"x": "y"},
+        )
+
+        assert result.exit_code == 1
+        # Mesmo sem rodar, retorna o estado inicial dos dicts para o orchestrator.
+        assert result.inputs == {"name": "kafka"}
+        assert result.global_computed_inputs == {"x": "y"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
