@@ -9,12 +9,9 @@ from typing import Any
 import yaml
 
 from templi.core.models import Plugin
+from templi.core.runtime_config import MANIFEST_FILE, get_manifest_dir
 from templi.utils.file_utils import ensure_directory, read_file, write_file
 from templi.utils.value_format import to_export_string
-
-
-MANIFEST_DIR = ".templi"
-MANIFEST_FILE = "manifest.yaml"
 
 
 def update_manifest(
@@ -37,7 +34,7 @@ def update_manifest(
     Returns:
         Caminho absoluto do arquivo gerado.
     """
-    manifest_dir = os.path.join(project_dir, MANIFEST_DIR)
+    manifest_dir = os.path.join(project_dir, get_manifest_dir())
     manifest_path = os.path.join(manifest_dir, MANIFEST_FILE)
     ensure_directory(manifest_dir)
 
@@ -78,7 +75,7 @@ def load_global_inputs(project_dir: str) -> dict[str, Any]:
     Retorna dict combinado com todos os globals disponíveis para
     plugins subsequentes.
     """
-    manifest_path = os.path.join(project_dir, MANIFEST_DIR, MANIFEST_FILE)
+    manifest_path = os.path.join(project_dir, get_manifest_dir(), MANIFEST_FILE)
     manifest = _load_existing_manifest(manifest_path)
 
     result: dict[str, Any] = {}

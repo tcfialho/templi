@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from templi.cli.printer import print_error
+from templi.core.runtime_config import DEFAULT_ENV_PREFIX, build_runtime_env_name
 from templi.utils.value_format import to_export_string
 
 
@@ -20,8 +21,8 @@ def execute_run_script_hook(
     Executa um script Python no contexto do projeto.
 
     Variáveis de ambiente injetadas:
-    - TEMPLI_PLUGIN_DIR: diretório absoluto do plugin
-    - TEMPLI_PROJECT_DIR: diretório absoluto do projeto
+    - <prefix>_PLUGIN_DIR: diretório absoluto do plugin
+    - <prefix>_PROJECT_DIR: diretório absoluto do projeto
     - Todos os inputs como UPPERCASE
     """
     full_script_path = os.path.normpath(os.path.join(plugin_source_dir, script_path))
@@ -72,8 +73,10 @@ def _build_environment(
 ) -> dict[str, str]:
     """Constrói mapa de variáveis de ambiente para o subprocess."""
     env = os.environ.copy()
-    env["TEMPLI_PLUGIN_DIR"] = os.path.abspath(plugin_source_dir)
-    env["TEMPLI_PROJECT_DIR"] = os.path.abspath(project_dir)
+    env.pop(f"{DEFAULT_ENV_PREFIX}_PLUGIN_DIR", None)
+    env.pop(f"{DEFAULT_ENV_PREFIX}_PROJECT_DIR", None)
+    env[build_runtime_env_name("PLUGIN_DIR")] = os.path.abspath(plugin_source_dir)
+    env[build_runtime_env_name("PROJECT_DIR")] = os.path.abspath(project_dir)
 
     for key, value in variables.items():
         env[key.upper()] = to_export_string(value)
