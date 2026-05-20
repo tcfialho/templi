@@ -1,0 +1,11 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: {{full_plugin_name}}
+  display-name: {{full_plugin_name}}
+  description: {{plugin_description}}
+  version: {{plugin_version}}
+spec:
+  type: app
+  inputs: []
+  hooks: []

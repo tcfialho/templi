@@ -1,0 +1,126 @@
+schema-version: v2
+kind: plugin
+metadata:
+  name: plugin-kafka-nodejs
+  display-name: Plugin Kafka NodeJS
+  description: Plugin para integração com Kafka no NodeJS
+  version: "1.0.0"
+spec:
+  type: app
+  repository: https://github.com/example/plugin-kafka-nodejs
+  inputs:
+    - label: "Tipo de aplicação"
+      name: catalog_application_type
+      type: text
+      required: true
+      items:
+        - webapi
+        - worker
+        - job
+    - label: "Caso de uso Kafka"
+      name: kafkausecase
+      type: text
+      required: true
+      items:
+        - producer
+        - consumer
+        - both
+    - label: "Nome do tópico"
+      name: topic_name
+      type: text
+      required: true
+    - label: "Grupo de consumidores"
+      name: consumer_group
+      type: text
+      required: false
+      default: ""
+    - label: "Tipo de autenticação"
+      name: auth_type
+      type: text
+      required: true
+      items:
+        - sasl
+        - plain
+    - label: "Namespace"
+      name: namespace
+      type: text
+      required: false
+      default: "default"
+  computed-inputs:
+    scenario: "{{catalog_application_type}}{{kafkausecase}}"
+  global-computed-inputs:
+    plugin_applied: "plugin-kafka-{{catalog_application_type}}"
+  hooks:
+    - type: render-templates
+      trigger: after-render
+      path: templates/base
+    - type: render-templates
+      trigger: after-render
+      path: templates/producer
+      condition:
+        variable: kafkausecase
+        operator: containsAny
+        value:
+          - producer
+          - both
+    - type: render-templates
+      trigger: after-render
+      path: templates/consumer
+      condition:
+        variable: kafkausecase
+        operator: containsAny
+        value:
+          - consumer
+          - both
+    - type: edit
+      trigger: after-render
+      path: src/index.js
+      condition:
+        variable: catalog_application_type
+        operator: "=="
+        value: webapi
+      changes:
+        - search:
+            string: "// KAFKA_IMPORT"
+            replace-by:
+              value: "const kafka = require('./kafka');"
+    - type: edit
+      trigger: after-render
+      path: src/worker.js
+      condition:
+        variable: catalog_application_type
+        operator: "=="
+        value: worker
+      changes:
+        - search:
+            string: "// KAFKA_IMPORT"
+            replace-by:
+              value: "const kafka = require('./kafka');"
+    - type: edit
+      trigger: after-render
+      path: src/job.js
+      condition:
+        variable: catalog_application_type
+        operator: "=="
+        value: job
+      changes:
+        - search:
+            string: "// KAFKA_IMPORT"
+            replace-by:
+              value: "const kafka = require('./kafka');"
+    - type: edit
+      trigger: after-render
+      path: helm/values.yaml
+      condition:
+        variable: auth_type
+        operator: "=="
+        value: sasl
+      changes:
+        - search:
+            string: "authType: plain"
+            replace-by:
+              value: "authType: sasl"
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "kafka plugin applied"'

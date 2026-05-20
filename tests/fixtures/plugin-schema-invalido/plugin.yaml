@@ -1,0 +1,9 @@
+schema-version: v99
+kind: plugin
+metadata:
+  name: invalid
+  display-name: Invalid
+  description: Plugin com schema inválido
+  version: 1.0.0
+spec:
+  type: app

@@ -1,0 +1,61 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: plugin-completo
+  display-name: Plugin Completo
+  description: Plugin com todos os tipos de hooks
+  version: 2.0.0
+spec:
+  type: app
+  compatibility:
+    - nodejs
+  technologies:
+    - Api
+  inputs:
+    - label: Nome
+      name: project_name
+      type: text
+      required: true
+    - label: Modo
+      name: mode
+      type: text
+      items:
+        - simples
+        - avancado
+      default: simples
+  computed-inputs:
+    full_plugin_name: "plugin-{{project_name}}"
+    upper_name: "{{project_name|upper}}"
+  global-computed-inputs:
+    plugin_applied: "{{plugin_applied|replace('-test', '')}}-test"
+  hooks:
+    - type: run-script
+      trigger: after-render
+      script: ./scripts/setup.py
+
+    - type: render-templates
+      trigger: after-render
+      path: snippets/WebApi
+      condition:
+        variable: mode
+        operator: "=="
+        value: avancado
+
+    - type: edit
+      trigger: after-render
+      path: config.js
+      changes:
+        - insert:
+            line: 0
+            value: "// Gerado automaticamente\n"
+        - search:
+            string: "module.exports"
+            insert-after:
+              value: "\nconst kafka = require('kafka');\n"
+            when:
+              not-exists: "const kafka"
+
+    - type: run
+      trigger: after-render
+      commands:
+        - echo "done"

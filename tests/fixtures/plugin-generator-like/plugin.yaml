@@ -1,0 +1,131 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: plugin-generator
+  display-name: Plugin Generator
+  description: Generator de plugins customizados
+  version: "1.0.0"
+spec:
+  type: app
+  inputs:
+    - label: "Nome do plugin"
+      name: plugin_name
+      type: text
+      required: true
+      pattern: "^([a-z][a-z0-9]*)(-[a-z0-9]+)*$"
+    - label: "Descrição"
+      name: plugin_description
+      type: text
+      required: true
+    - label: "Ecossistema"
+      name: ecosystem
+      type: select
+      required: true
+      items:
+        - dotnet
+        - nodejs
+        - python
+    - label: "Tem plugin base?"
+      name: has_base_plugin
+      type: select
+      required: true
+      items:
+        - Sim
+        - Nao
+      default: Nao
+      condition:
+        variable: ecosystem
+        operator: "=="
+        value: dotnet
+    - label: "Tipos de app"
+      name: app_types
+      type: multiselect
+      required: true
+      items:
+        - webapi
+        - worker
+        - job
+    - label: "Tem secrets?"
+      name: has_secrets
+      type: bool
+      required: false
+      default: false
+    - label: "Tem snippets?"
+      name: has_snippets
+      type: bool
+      required: false
+      default: false
+    - label: "Tem edits?"
+      name: has_edits
+      type: bool
+      required: false
+      default: false
+    - label: "Versão do plugin"
+      name: plugin_version
+      type: text
+      required: true
+      default: "0.0.1"
+    - label: "URL do repositório"
+      name: repository_url
+      type: text
+      required: false
+      default: ""
+    - label: "Tem helm values?"
+      name: has_helm_values
+      type: bool
+      required: false
+      default: false
+    - label: "Tem catalog info?"
+      name: has_catalog_info
+      type: bool
+      required: false
+      default: false
+  computed-inputs:
+    full_plugin_name: "plugin-{{plugin_name}}"
+  global-computed-inputs:
+    plugin_applied: "{{full_plugin_name}}"
+  hooks:
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "plugin-generator: done"'
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "helm values enabled"'
+      condition:
+        variable: has_helm_values
+        operator: "=="
+        value: "true"
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "catalog info enabled"'
+      condition:
+        variable: has_catalog_info
+        operator: "=="
+        value: "true"
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "edits enabled"'
+      condition:
+        variable: has_edits
+        operator: "=="
+        value: "true"
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "ecosystem: dotnet"'
+      condition:
+        variable: ecosystem
+        operator: "=="
+        value: "dotnet"
+    - type: run
+      trigger: after-render
+      commands:
+        - 'echo "ecosystem: nodejs"'
+      condition:
+        variable: ecosystem
+        operator: "=="
+        value: "nodejs"

@@ -1,0 +1,43 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: plugin-com-condicoes
+  display-name: Plugin Com Condicoes
+  description: Plugin para testar condições em inputs
+  version: 1.0.0
+spec:
+  type: app
+  inputs:
+    - label: Ecossistema
+      name: ecosystem
+      type: text
+      required: true
+      items:
+        - dotnet
+        - nodejs
+        - python
+    - label: Plugin base?
+      name: has_base_plugin
+      type: text
+      required: true
+      items:
+        - Sim
+        - Nao
+      default: Nao
+      condition:
+        variable: ecosystem
+        operator: "=="
+        value: dotnet
+    - label: Tipos de app
+      name: app_types
+      type: multiselect
+      required: true
+      items:
+        - webapi
+        - worker
+        - job
+      condition:
+        variable: ecosystem
+        operator: "!="
+        value: python
+  hooks: []

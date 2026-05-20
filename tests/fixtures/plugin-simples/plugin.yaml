@@ -1,0 +1,15 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: test-plugin
+  display-name: Test Plugin
+  description: Plugin para teste
+  version: 1.0.0
+spec:
+  type: app
+  inputs:
+    - label: Nome
+      name: project_name
+      type: text
+      required: true
+  hooks: []

@@ -1,0 +1,43 @@
+schema-version: v3
+kind: plugin
+metadata:
+  name: plugin-com-edits
+  display-name: Plugin Com Edits
+  description: Plugin para testar todas as operações de edit
+  version: 1.0.0
+spec:
+  type: app
+  inputs:
+    - label: Nome
+      name: project_name
+      type: text
+      required: true
+  hooks:
+    - type: edit
+      trigger: after-render
+      path: "{{project_name}}/index.js"
+      changes:
+        - insert:
+            line: 0
+            value: "// Header\n"
+            when:
+              not-exists: "// Header"
+        - insert:
+            line: -1
+            snippet: snippets/footer.txt
+        - search:
+            string: "const app"
+            insert-before:
+              value: "const logger = require('./logger');\n"
+            when:
+              not-exists: "const logger"
+        - search:
+            string: "app.listen"
+            insert-after:
+              value: "app.use('/api', router);\n"
+        - search:
+            string: "OLD_VALUE"
+            replace-by:
+              value: "NEW_VALUE"
+            when:
+              exists: "OLD_VALUE"
