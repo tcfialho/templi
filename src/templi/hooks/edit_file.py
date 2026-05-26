@@ -31,6 +31,7 @@ def execute_edit_hook(
     target_file = os.path.join(project_dir, rendered_path)
 
     content = _read_or_empty(target_file)
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
     original_content = content
 
     for change in changes:
@@ -52,13 +53,13 @@ def _apply_change(
     if change.insert_line is not None:
         return _apply_insert(content, change, plugin_source_dir, variables)
 
-    if change.search_string is not None:
-        rendered_search = render_template_string(change.search_string, variables)
-        if rendered_search not in content:
+    search_text = _resolve_search_text(change, plugin_source_dir, variables)
+    if search_text is not None:
+        if search_text not in content:
             return content
-        match_pos = content.find(rendered_search)
+        match_pos = content.find(search_text)
         return _apply_search_operations(
-            content, change, rendered_search, match_pos, plugin_source_dir, variables,
+            content, change, search_text, match_pos, plugin_source_dir, variables,
         )
 
     if change.search_pattern is not None:
@@ -82,26 +83,51 @@ def _apply_insert(
     insert_value = _resolve_value(
         change.insert_value, change.insert_snippet, plugin_source_dir, variables,
     )
-    if not insert_value or not _guards_pass(change, content, variables):
+    if not insert_value or not _guards_pass(change, content, plugin_source_dir, variables):
         return content
 
     lines = content.splitlines(keepends=True)
     line_number = change.insert_line
 
     if line_number == 0:
+        insert_value = insert_value.lstrip("\n")
         return insert_value + content
 
     if line_number == -1:
-        if content and not content.endswith("\n"):
-            return content + "\n" + insert_value
-        return content + insert_value
+        if not content:
+            return insert_value.lstrip("\n")
+        trimmed = content.rstrip("\n")
+        stripped_insert = insert_value.lstrip("\n")
+        if stripped_insert.startswith("*/") and trimmed.endswith("}"):
+            return trimmed + stripped_insert
+        if insert_value.startswith("\n\n"):
+            return trimmed + insert_value
+        if insert_value.startswith("\n"):
+            if content.endswith("\n"):
+                return trimmed + "\n\n" + insert_value.lstrip("\n")
+            return trimmed + insert_value
+        return trimmed + "\n" + insert_value.lstrip("\n")
 
-    # Para line_number negativos < -1, insere antes da N-ésima linha contada do final.
-    # Para positivos, insere antes da linha N (1-indexed).
+    # Negativos < -1: insere antes da N-ésima linha contada do final.
+    # Positivos: insere apos a linha N (1-indexed), pulando linhas em branco.
     if line_number < -1:
-        target_index = max(len(lines) + line_number + 1, 0)
+        target_index = max(len(lines) + line_number, 0)
+        payload = insert_value if insert_value.endswith("\n") else insert_value + "\n"
+        if (
+            target_index < len(lines)
+            and lines[target_index].lstrip().startswith("//")
+            and payload.lstrip().startswith("//")
+        ):
+            lines[target_index] = payload.rstrip("\n") + lines[target_index].lstrip("\n")
+            return "".join(lines)
+        lines.insert(target_index, payload)
+        return "".join(lines)
     else:
-        target_index = min(line_number - 1, len(lines))
+        target_index = min(line_number, len(lines))
+        while target_index < len(lines) and lines[target_index].strip() == "":
+            target_index += 1
+        if insert_value.startswith("\n"):
+            insert_value = insert_value[1:]
 
     payload = insert_value if insert_value.endswith("\n") else insert_value + "\n"
     lines.insert(target_index, payload)
@@ -117,7 +143,7 @@ def _apply_search_operations(
     variables: dict,
 ) -> str:
     """Apply insert-before / insert-after / replace-by relative to a match."""
-    if not _guards_pass(change, content, variables):
+    if not _guards_pass(change, content, plugin_source_dir, variables):
         return content
 
     if change.insert_before_value is not None or change.insert_before_snippet is not None:
@@ -148,8 +174,20 @@ def _apply_search_operations(
     return content
 
 
-def _guards_pass(change: HookChange, content: str, variables: dict) -> bool:
+def _guards_pass(
+    change: HookChange,
+    content: str,
+    plugin_source_dir: str,
+    variables: dict,
+) -> bool:
     """Avalia guards when.not-exists / when.exists contra o conteúdo atual."""
+    if change.when_not_exists_snippet:
+        guard_text = _resolve_value(
+            None, change.when_not_exists_snippet, plugin_source_dir, variables,
+        )
+        if guard_text and guard_text in content:
+            return False
+
     if change.when_not_exists:
         guard_str = render_template_string(change.when_not_exists, variables)
         if guard_str in content:
@@ -163,14 +201,60 @@ def _guards_pass(change: HookChange, content: str, variables: dict) -> bool:
     return True
 
 
+def _resolve_search_text(
+    change: HookChange,
+    plugin_source_dir: str,
+    variables: dict,
+) -> str | None:
+    if change.search_string is not None:
+        return render_template_string(change.search_string, variables)
+    if change.search_snippet is not None:
+        return _resolve_value(None, change.search_snippet, plugin_source_dir, variables)
+    return None
+
+
 def _insert_after_line(
     content: str, match_pos: int, match_len: int, insert_value: str,
 ) -> str:
     """Insere conteúdo após o fim da LINHA que contém a match (após o \\n)."""
     line_end = content.find("\n", match_pos + match_len)
-    if line_end >= 0:
-        return content[:line_end + 1] + insert_value + content[line_end + 1:]
-    return content + "\n" + insert_value
+    if line_end < 0:
+        if insert_value.startswith("\n"):
+            if content and not content.endswith("\n"):
+                return content + "\n" + insert_value
+            return content + insert_value
+        payload = insert_value.lstrip("\n")
+        return content + ("\n" if content and not content.endswith("\n") else "") + payload
+
+    insert_at = line_end + 1
+
+    line_start = content.rfind("\n", 0, match_pos)
+    prefix_end = line_start + 1 if line_start >= 0 else 0
+    previous_line = content[prefix_end:line_end + 1] if line_end >= 0 else content
+    if previous_line.rstrip().endswith("}") and insert_value.startswith("\n"):
+        insert_value = insert_value.lstrip("\n")
+
+    if (
+        insert_value.startswith("\n\n")
+        and insert_at + 1 < len(content)
+        and content[insert_at : insert_at + 2] == "\n\n"
+    ):
+        insert_value = insert_value[1:]
+    elif (
+        insert_value.startswith("\n\n")
+        and insert_at < len(content)
+        and content[insert_at] == "\n"
+        and (insert_at + 1 >= len(content) or content[insert_at + 1] != "\n")
+    ):
+        insert_value = insert_value[1:]
+
+    if insert_value and not insert_value.endswith("\n"):
+        if insert_at >= len(content) or content[insert_at] not in "\r\n":
+            insert_value = insert_value + "\n"
+        elif insert_value.count("\n") > 1:
+            insert_value = insert_value + "\n"
+
+    return content[:insert_at] + insert_value + content[insert_at:]
 
 
 def _insert_before_line(
@@ -196,14 +280,18 @@ def _resolve_value(
 ) -> str:
     """Resolve o conteúdo: direto ou snippet file renderizado com Jinja."""
     if value is not None:
-        return render_template_string(value, variables)
+        rendered = render_template_string(value, variables)
+        return rendered.replace("\r\n", "\n").replace("\r", "\n")
 
     if snippet_path is not None:
-        snippet_full_path = os.path.join(plugin_source_dir, snippet_path)
+        rendered_snippet_path = render_template_string(snippet_path, variables)
+        rendered_snippet_path = rendered_snippet_path.replace("/", os.sep).replace("\\", os.sep)
+        snippet_full_path = os.path.join(plugin_source_dir, rendered_snippet_path)
         try:
             snippet_content = read_file(snippet_full_path)
         except OSError:
             return ""
+        snippet_content = snippet_content.replace("\r\n", "\n").replace("\r", "\n")
         return render_template_string(snippet_content, variables)
 
     return ""

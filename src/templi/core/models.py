@@ -43,6 +43,7 @@ class HookChange:
     insert_snippet: str | None = None
     # Search
     search_string: str | None = None
+    search_snippet: str | None = None
     search_pattern: str | None = None  # regex pattern (alternativa a search_string)
     insert_before_value: str | None = None
     insert_before_snippet: str | None = None
@@ -52,6 +53,7 @@ class HookChange:
     replace_by_snippet: str | None = None
     # Guards
     when_not_exists: str | None = None
+    when_not_exists_snippet: str | None = None
     when_exists: str | None = None
     # Condition (change-level, avaliada antes de aplicar a change)
     condition: Condition | None = None
@@ -68,7 +70,21 @@ class Hook:
     commands: list[str] | None = None  # run
     path: str | None = None  # render-templates, edit
     changes: list[HookChange] | None = None  # edit
+    json_changes: list[JsonHookChange] | None = None  # edit-json
     encoding: str | None = None  # encoding do arquivo
+    indent: str | None = None  # indentação ao gravar JSON
+    condition: Condition | None = None
+
+
+@dataclass
+class JsonHookChange:
+    """Uma operação dentro de um hook edit-json."""
+
+    jsonpath: str
+    update_snippet: str | None = None
+    update_value: str | None = None
+    when_not_exists: str | None = None
+    when_exists: str | None = None
     condition: Condition | None = None
 
 
@@ -106,4 +122,5 @@ class Plugin:
     kind: str
     metadata: PluginMetadata
     spec: PluginSpec
-    source_directory: str  # Caminho absoluto do diretório do plugin
+    source_directory: str
+    is_legacy_yaml: bool = False

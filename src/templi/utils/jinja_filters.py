@@ -6,19 +6,16 @@ import re
 
 
 def kebabcase(value: str) -> str:
-    """PascalCase/camelCase/snake_case → kebab-case."""
+    """PascalCase/camelCase/snake_case -> kebab-case."""
     text = str(value)
-    # Inserir hífens antes de letras maiúsculas
     text = re.sub(r"(?<!^)(?=[A-Z])", "-", text)
-    # Substituir underscores e espaços por hífens
     text = text.replace("_", "-").replace(" ", "-")
-    # Colapsar múltiplos hífens
     text = re.sub(r"-+", "-", text)
     return text.lower()
 
 
 def camelcase(value: str) -> str:
-    """kebab-case/snake_case → camelCase."""
+    """kebab-case/snake_case -> camelCase."""
     parts = re.split(r"[-_ ]+", str(value))
     if not parts:
         return ""
@@ -26,6 +23,15 @@ def camelcase(value: str) -> str:
 
 
 def pascalcase(value: str) -> str:
-    """kebab-case/snake_case → PascalCase."""
+    """kebab-case/snake_case -> PascalCase."""
     parts = re.split(r"[-_ ]+", str(value))
     return "".join(part.capitalize() for part in parts)
+
+
+def sequence_join(value, separator=", ") -> str:
+    """Compatibilidade: join em string retorna a propria string."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return separator.join(str(item) for item in value)
+    return str(value)

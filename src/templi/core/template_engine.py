@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from jinja2 import BaseLoader, ChainableUndefined, Environment, UndefinedError
 
@@ -14,7 +15,7 @@ from templi.utils.file_utils import (
     read_text_or_detect_binary,
     write_file,
 )
-from templi.utils.jinja_filters import camelcase, kebabcase, pascalcase
+from templi.utils.jinja_filters import camelcase, kebabcase, pascalcase, sequence_join
 
 
 def create_jinja_env() -> Environment:
@@ -33,6 +34,7 @@ def create_jinja_env() -> Environment:
     env.filters["kebabcase"] = kebabcase
     env.filters["camelcase"] = camelcase
     env.filters["pascalcase"] = pascalcase
+    env.filters["join"] = sequence_join
     return env
 
 
@@ -81,30 +83,52 @@ def render_templates_directory(
 
             content = read_text_or_detect_binary(source_file)
             if content is None:
+                if os.path.isfile(target_file):
+                    continue
                 copy_file(source_file, target_file)
-            else:
-                try:
-                    rendered_content = render_template_string(content, variables, env)
-                except UndefinedError as exc:
-                    rel_name = os.path.relpath(source_file, source_dir)
-                    print_warning(
-                        f"Erro ao avaliar a sintaxe Jinja: '{exc}'.\n"
-                        f"  Detalhes: {exc}.\n"
-                        f"  Verifique a sintaxe para evitar problemas inesperados."
-                    )
-                    raise SystemExit(
-                        f"ERRO: Fail to use jinja at file: {rel_name} message: {exc}"
-                    ) from exc
+                created_files.append(target_file)
+                continue
 
-                if rendered_content.strip():
-                    existing = _read_or_empty(target_file)
-                    if existing.strip():
-                        rendered_content = _merge_template_contents(
-                            rendered_content, existing,
-                        )
+            try:
+                rendered_content = render_template_string(content, variables, env)
+            except UndefinedError as exc:
+                rel_name = os.path.relpath(source_file, source_dir)
+                print_warning(
+                    f"Erro ao avaliar a sintaxe Jinja: '{exc}'.\n"
+                    f"  Detalhes: {exc}.\n"
+                    f"  Verifique a sintaxe para evitar problemas inesperados."
+                )
+                raise SystemExit(
+                    f"ERRO: Fail to use jinja at file: {rel_name} message: {exc}"
+                ) from exc
 
-                write_file(target_file, rendered_content)
+            existing = _read_or_empty(target_file)
 
+            if not rendered_content.strip():
+                if not existing.strip():
+                    write_file(target_file, "")
+                    created_files.append(target_file)
+                continue
+
+            if existing.strip():
+                if rendered_content.strip() in existing:
+                    continue
+                if _content_lines_contained_in(rendered_content, existing):
+                    continue
+                merged = _merge_template_contents(
+                    rendered_content, existing,
+                )
+                if _merge_would_duplicate_yaml_documents(merged):
+                    continue
+                if _has_duplicate_public_types(merged):
+                    rendered_content = rendered_content
+                else:
+                    rendered_content = merged
+
+            if existing.strip() and target_file.endswith(".cs"):
+                rendered_content = _preserve_extra_usings(rendered_content, existing)
+
+            write_file(target_file, rendered_content)
             created_files.append(target_file)
 
     return created_files
@@ -116,6 +140,37 @@ def _read_or_empty(path: str) -> str:
         return read_file(path)
     except OSError:
         return ""
+
+
+def _preserve_extra_usings(new_content: str, old_content: str) -> str:
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    old_usings = [
+        (index, line) for index, line in enumerate(old_lines)
+        if line.strip().startswith("using ")
+    ]
+    missing = [
+        (index, line) for index, line in old_usings
+        if line not in new_content
+    ]
+    if not missing:
+        return new_content
+
+    result = list(new_lines)
+    for old_index, using_line in missing:
+        insert_at = 0
+        for previous_index, previous_line in old_usings:
+            if previous_index >= old_index:
+                break
+            if previous_line in result:
+                insert_at = result.index(previous_line) + 1
+        result.insert(insert_at, using_line)
+
+    line_ending = "\r\n" if "\r\n" in new_content else "\n"
+    merged = line_ending.join(result)
+    if new_content.endswith(("\n", "\r\n")):
+        merged += line_ending
+    return merged
 
 
 def _split_into_paragraphs(content: str) -> list[list[str]]:
@@ -139,37 +194,128 @@ def _split_into_paragraphs(content: str) -> list[list[str]]:
     return paragraphs
 
 
-def _merge_template_contents(new_content: str, old_content: str) -> str:
-    """Merge new template content with existing file content.
+def _paragraph_to_text(paragraph_lines: list[str]) -> str:
+    return "".join(paragraph_lines).rstrip("\r\n")
 
-    The renderer performs a paragraph-level interleave when a rendered
-    template collides with an existing file:
-      1. Both contents are split into paragraphs (groups of consecutive
-         non-blank lines, separated by blank lines).
-      2. For each paragraph index *i*, the new paragraph's lines are
-         followed by the old paragraph's lines (raw concatenation,
-         preserving original line endings).
-      3. Merged paragraph groups are separated by a single blank line.
-      4. Remaining paragraphs from the longer source are appended.
-    """
+
+def _join_paragraph_blocks(
+    paragraphs: list[list[str]],
+    line_ending: str,
+) -> str:
+    blocks = [_paragraph_to_text(block) for block in paragraphs if block]
+    return (line_ending * 2).join(blocks)
+
+
+def _merge_paragraph_blocks(
+    new_block: str,
+    old_block: str,
+    line_ending: str,
+) -> str:
+    if new_block == old_block or old_block.startswith(new_block):
+        return old_block
+    if new_block.startswith(old_block):
+        return new_block
+    if old_block.startswith("- "):
+        return f"{new_block.rstrip()}{line_ending}{old_block}"
+    return f"{new_block}{line_ending}{old_block}"
+
+
+def _merge_template_contents(new_content: str, old_content: str) -> str:
+    """Interleave template paragraphs with existing file paragraphs."""
+    if not old_content.strip():
+        return new_content
+    if not new_content.strip():
+        return old_content
+
     new_paragraphs = _split_into_paragraphs(new_content)
     old_paragraphs = _split_into_paragraphs(old_content)
+    line_ending = "\r\n" if "\r\n" in old_content or "\r\n" in new_content else "\n"
 
-    # Detect line ending style from the old content
-    line_ending = "\r\n" if "\r\n" in old_content else "\n"
+    if len(new_paragraphs) != len(old_paragraphs):
+        merged_blocks: list[str] = []
+        total = max(len(new_paragraphs), len(old_paragraphs))
+        for index in range(total):
+            new_block = (
+                _paragraph_to_text(new_paragraphs[index])
+                if index < len(new_paragraphs)
+                else ""
+            )
+            old_block = (
+                _paragraph_to_text(old_paragraphs[index])
+                if index < len(old_paragraphs)
+                else ""
+            )
+            if new_block and old_block:
+                if index == 0 and len(old_paragraphs) == 1:
+                    if new_block == old_block or old_block.startswith(new_block):
+                        merged_blocks.append(old_block)
+                    elif new_block.startswith(old_block):
+                        merged_blocks.append(new_block)
+                    else:
+                        merged_blocks.append(
+                            f"{old_block}{line_ending}{new_block}",
+                        )
+                else:
+                    merged_blocks.append(
+                        _merge_paragraph_blocks(new_block, old_block, line_ending),
+                    )
+            elif new_block:
+                merged_blocks.append(new_block)
+            elif old_block:
+                merged_blocks.append(old_block)
 
-    merged_parts: list[str] = []
-    max_len = max(len(new_paragraphs), len(old_paragraphs))
+        separator = line_ending * 2
+        merged = separator.join(merged_blocks)
+        if new_content.endswith(("\n", "\r\n")) or old_content.endswith(("\n", "\r\n")):
+            merged += line_ending
+        return merged
 
-    for i in range(max_len):
-        if i > 0:
-            merged_parts.append(line_ending)  # blank-line separator
-        if i < len(new_paragraphs):
-            merged_parts.append("".join(new_paragraphs[i]))
-        if i < len(old_paragraphs):
-            merged_parts.append("".join(old_paragraphs[i]))
+    merged_blocks: list[str] = []
+    total = max(len(new_paragraphs), len(old_paragraphs))
+    for index in range(total):
+        new_block = (
+            _paragraph_to_text(new_paragraphs[index])
+            if index < len(new_paragraphs)
+            else ""
+        )
+        old_block = (
+            _paragraph_to_text(old_paragraphs[index])
+            if index < len(old_paragraphs)
+            else ""
+        )
+        if new_block and old_block:
+            merged_blocks.append(
+                _merge_paragraph_blocks(new_block, old_block, line_ending),
+            )
+        elif new_block:
+            merged_blocks.append(new_block)
+        else:
+            merged_blocks.append(old_block)
 
-    return "".join(merged_parts)
+    separator = line_ending * 2
+    merged = separator.join(merged_blocks)
+    if new_content.endswith(("\n", "\r\n")) or old_content.endswith(("\n", "\r\n")):
+        merged += line_ending
+    return merged
+
+
+def _content_lines_contained_in(new_content: str, old_content: str) -> bool:
+    """Return True when every non-empty line of new_content exists in old_content."""
+    old_lines = {line.rstrip() for line in old_content.splitlines() if line.strip()}
+    return all(
+        line.rstrip() in old_lines
+        for line in new_content.splitlines()
+        if line.strip()
+    )
+
+
+def _merge_would_duplicate_yaml_documents(content: str) -> bool:
+    return content.lstrip().count("apiVersion:") > 1
+
+
+def _has_duplicate_public_types(content: str) -> bool:
+    type_names = re.findall(r"public\s+(?:static\s+)?class\s+(\w+)", content)
+    return len(type_names) != len(set(type_names))
 
 
 def _render_path_components(

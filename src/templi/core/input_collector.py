@@ -95,7 +95,9 @@ def _normalize_value(plugin_input: PluginInput, raw_value: str) -> Any:
         return [item.strip() for item in raw_value.split(",") if item.strip()]
 
     if plugin_input.type == "bool":
-        return raw_value.lower() in ("true", "sim", "yes", "1")
+        if isinstance(raw_value, bool):
+            return raw_value
+        return str(raw_value).lower() in ("true", "sim", "yes", "1")
 
     return raw_value
 

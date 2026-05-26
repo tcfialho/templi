@@ -41,8 +41,14 @@ def apply():
     is_flag=True,
     help="Aplica plugins requeridos automaticamente.",
 )
+@click.option(
+    "--no-update-manifest",
+    is_flag=True,
+    hidden=True,
+    help="Não registra o plugin no manifesto local (applies aninhados via hook run).",
+)
 @click.pass_context
-def apply_plugin(ctx, name_or_path, skip_warning, non_interactive, inputs_json, automatic_apply_requirements):
+def apply_plugin(ctx, name_or_path, skip_warning, non_interactive, inputs_json, automatic_apply_requirements, no_update_manifest):
     """Aplica um plugin ao projeto atual.
 
     NAME_OR_PATH é o caminho para o diretório do plugin contendo plugin.yaml.
@@ -69,6 +75,7 @@ def apply_plugin(ctx, name_or_path, skip_warning, non_interactive, inputs_json, 
             project_dir=os.getcwd(),
             cli_inputs=cli_inputs,
             is_non_interactive=non_interactive,
+            persist_manifest=not no_update_manifest,
         )
 
         print_applied(name_or_path)

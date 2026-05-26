@@ -11,6 +11,7 @@ dependencies = [
     "click>=8.1",
     "jinja2>=3.1",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
     "InquirerPy>=0.3",
 ]
 

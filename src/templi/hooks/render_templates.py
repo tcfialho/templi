@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from templi.core.template_engine import render_templates_directory
+from templi.core.template_engine import render_template_string, render_templates_directory
 
 
 
@@ -23,5 +23,6 @@ def execute_render_templates_hook(
     Returns:
         Lista de arquivos criados.
     """
-    source_dir = os.path.join(plugin_source_dir, hook_path)
+    rendered_hook_path = render_template_string(hook_path, variables)
+    source_dir = os.path.join(plugin_source_dir, rendered_hook_path.replace("/", os.sep))
     return render_templates_directory(source_dir, project_dir, variables)

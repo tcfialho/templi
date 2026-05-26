@@ -11,6 +11,7 @@ from templi.core.models import (
     Condition,
     Hook,
     HookChange,
+    JsonHookChange,
     Plugin,
     PluginInput,
     PluginMetadata,
@@ -18,7 +19,43 @@ from templi.core.models import (
 )
 from templi.utils.file_utils import read_file
 
-SUPPORTED_SCHEMA_VERSIONS = ("v2", "v3")
+SUPPORTED_SCHEMA_VERSIONS = ("v1", "v2", "v3")
+
+
+def _normalize_plugin_raw(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    schema_version = str(raw.get("schema-version", ""))
+    if schema_version == "v1":
+        normalized = dict(raw)
+        metadata = dict(normalized.get("metadata") or {})
+        normalized["metadata"] = metadata
+        normalized["schema-version"] = "v2"
+        return normalized, False
+    if schema_version:
+        return raw, False
+
+    metadata = {
+        "name": raw.get("name", ""),
+        "description": raw.get("description", ""),
+        "display-name": raw.get("display-name", raw.get("name", "")),
+        "version": str(raw.get("version", "")),
+        "picture": raw.get("picture"),
+    }
+    spec_field_names = (
+        "type", "compatibility", "technologies", "inputs", "hooks",
+        "computed-inputs", "global-computed-inputs", "repository",
+        "about", "usage", "implementation", "release-notes", "single-use",
+    )
+    spec = {key: raw[key] for key in spec_field_names if key in raw}
+    if "type" not in spec:
+        plugin_types = raw.get("types") or []
+        if plugin_types:
+            spec["type"] = plugin_types[0]
+    return {
+        "schema-version": "v2",
+        "kind": raw.get("kind", "plugin"),
+        "metadata": metadata,
+        "spec": spec,
+    }, True
 
 
 def load_plugin(plugin_dir: str) -> Plugin:
@@ -41,10 +78,15 @@ def load_plugin(plugin_dir: str) -> Plugin:
         )
 
     raw = yaml.safe_load(read_file(plugin_yaml_path))
-    return _parse_plugin(raw, plugin_dir)
+    raw, is_legacy_yaml = _normalize_plugin_raw(raw or {})
+    return _parse_plugin(raw, plugin_dir, is_legacy_yaml=is_legacy_yaml)
 
 
-def _parse_plugin(raw: dict[str, Any], source_directory: str) -> Plugin:
+def _parse_plugin(
+    raw: dict[str, Any],
+    source_directory: str,
+    is_legacy_yaml: bool = False,
+) -> Plugin:
     """Parseia o dict YAML bruto em um Plugin tipado."""
     schema_version = str(raw.get("schema-version", ""))
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -63,6 +105,7 @@ def _parse_plugin(raw: dict[str, Any], source_directory: str) -> Plugin:
         metadata=metadata,
         spec=spec,
         source_directory=source_directory,
+        is_legacy_yaml=is_legacy_yaml,
     )
 
 
@@ -193,6 +236,19 @@ def _parse_hook(raw: dict[str, Any]) -> Hook:
             condition=condition,
         )
 
+    if hook_type == "edit-json":
+        raw_changes = raw.get("changes") or []
+        json_changes = [_parse_json_change(raw_change) for raw_change in raw_changes]
+        return Hook(
+            type=hook_type,
+            trigger=trigger,
+            path=raw.get("path"),
+            json_changes=json_changes,
+            encoding=raw.get("encoding"),
+            indent=raw.get("indent"),
+            condition=condition,
+        )
+
     if hook_type == "edit":
         raw_changes = raw.get("changes") or []
         changes = [_parse_change(raw_change) for raw_change in raw_changes]
@@ -228,12 +284,14 @@ def _parse_change(raw: dict[str, Any]) -> HookChange:
         change.insert_snippet = insert_block.get("snippet")
         when_block = insert_block.get("when", {})
         change.when_not_exists = when_block.get("not-exists")
+        change.when_not_exists_snippet = when_block.get("not-exists-snippet")
         change.when_exists = when_block.get("exists")
 
     # Search + operação
     if "search" in raw:
         search_block = raw["search"]
         change.search_string = search_block.get("string")
+        change.search_snippet = search_block.get("snippet")
         change.search_pattern = search_block.get("pattern")
 
         if "insert-before" in search_block:
@@ -253,13 +311,15 @@ def _parse_change(raw: dict[str, Any]) -> HookChange:
 
         when_block = search_block.get("when", {})
         change.when_not_exists = when_block.get("not-exists")
+        change.when_not_exists_snippet = when_block.get("not-exists-snippet")
         change.when_exists = when_block.get("exists")
 
     # Fallback: when como sibling de insert/search (ao invés de aninhado)
-    if change.when_not_exists is None and change.when_exists is None:
+    if change.when_not_exists is None and change.when_not_exists_snippet is None and change.when_exists is None:
         when_block = raw.get("when", {})
         if when_block:
             change.when_not_exists = when_block.get("not-exists")
+            change.when_not_exists_snippet = when_block.get("not-exists-snippet")
             change.when_exists = when_block.get("exists")
 
     # Change-level condition (pode estar dentro de search, insert, ou como sibling)
@@ -273,3 +333,18 @@ def _parse_change(raw: dict[str, Any]) -> HookChange:
     change.condition = _parse_condition(raw_condition)
 
     return change
+
+
+def _parse_json_change(raw: dict[str, Any]) -> JsonHookChange:
+    """Parseia uma change de um hook edit-json."""
+    update_block = raw.get("update") or {}
+    when_block = raw.get("when") or {}
+    inline_value = update_block.get("value")
+    return JsonHookChange(
+        jsonpath=raw.get("jsonpath", ""),
+        update_snippet=update_block.get("snippet"),
+        update_value=inline_value if isinstance(inline_value, str) else None,
+        when_not_exists=when_block.get("not-exists"),
+        when_exists=when_block.get("exists"),
+        condition=_parse_condition(raw.get("condition")),
+    )
