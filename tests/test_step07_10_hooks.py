@@ -8,7 +8,14 @@ from templi.hooks.edit_file import execute_edit_hook
 from templi.hooks.run_command import execute_run_hook
 from templi.hooks.run_script import _build_environment, execute_run_script_hook
 from templi.core.models import HookChange
-from templi.core.runtime_config import COMPAT_NAME_ENV
+from templi.core.runtime_config import (
+    APPLY_PLUGIN_COMMAND_ENV,
+    COMPAT_NAME_ENV,
+    ENV_PREFIX_ENV,
+    PLUGIN_DIRECTORY_PREFIX_ENV,
+    PLUGIN_NAMESPACE_ENV,
+    PLUGINS_ROOT_ENV_NAME_ENV,
+)
 
 
 class TestRunScriptEnvironment:
@@ -42,6 +49,18 @@ class TestRunScriptEnvironment:
         assert env["CUSTOMTOOL_PROJECT_DIR"] == os.path.abspath(str(project_dir))
         assert "TEMPLI_PLUGIN_DIR" not in env
         assert "TEMPLI_PROJECT_DIR" not in env
+
+    def test_uses_configured_env_prefix_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+        monkeypatch.setenv(ENV_PREFIX_ENV, "LegacyEnv")
+
+        plugin_dir = tmp_path / "plugin"
+        project_dir = tmp_path / "project"
+
+        env = _build_environment(str(plugin_dir), str(project_dir), {})
+
+        assert env["LEGACYENV_PLUGIN_DIR"] == os.path.abspath(str(plugin_dir))
+        assert env["LEGACYENV_PROJECT_DIR"] == os.path.abspath(str(project_dir))
 
     def test_metadata_mock_exposes_global_computed_inputs(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
@@ -407,6 +426,68 @@ class TestEditHookJinjaPath:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestRunHook:
+    def test_plugin_apply_argv_strips_shell_quotes(self):
+        from templi.hooks.run_command import _plugin_apply_argv
+
+        command = (
+            'python -m templi.main apply plugin "C:\\plugins\\templi-plugin-sem-arquitetura" '
+            "-s --solution_name 'Ti.Templi' --catalog_application_type 'webapi'"
+        )
+        argv = _plugin_apply_argv(command)
+        assert argv is not None
+        assert argv[-4:] == [
+            "--solution_name",
+            "Ti.Templi",
+            "--catalog_application_type",
+            "webapi",
+        ]
+
+    def test_configured_apply_command_alias(self, monkeypatch):
+        from templi.hooks.run_command import _plugin_apply_argv
+
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+        command = (
+            'customtool apply plugin "C:\\plugins\\templi-plugin-sem-arquitetura" '
+            "-s --solution_name 'Ti.Templi'"
+        )
+
+        argv = _plugin_apply_argv(command)
+
+        assert argv is not None
+        assert argv[-2:] == ["--solution_name", "Ti.Templi"]
+
+    def test_configured_apply_command_override(self, monkeypatch):
+        from templi.hooks.run_command import _plugin_apply_argv
+
+        monkeypatch.setenv(APPLY_PLUGIN_COMMAND_ENV, "legacy apply extension")
+        command = 'legacy apply extension "C:\\plugins\\templi-plugin" -s'
+
+        argv = _plugin_apply_argv(command)
+
+        assert argv is not None
+        assert argv[3:6] == ["apply", "plugin", "C:\\plugins\\templi-plugin"]
+        assert argv[-1] == "-s"
+
+    def test_configured_nested_apply_rewrite(self, tmp_path, monkeypatch):
+        from templi.hooks.run_command import _rewrite_nested_plugin_apply
+
+        plugins_root = tmp_path / "plugins"
+        plugin_dir = plugins_root / "catalog" / "legacyfamily-core" / "sample-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.yaml").write_text("schema-version: v3\n", encoding="utf-8")
+
+        monkeypatch.setenv(COMPAT_NAME_ENV, "LegacyCli")
+        monkeypatch.setenv(PLUGIN_NAMESPACE_ENV, "partner")
+        monkeypatch.setenv(PLUGIN_DIRECTORY_PREFIX_ENV, "legacyfamily")
+        monkeypatch.setenv(PLUGINS_ROOT_ENV_NAME_ENV, "LEGACY_PLUGINS_ROOT")
+        monkeypatch.setenv("LEGACY_PLUGINS_ROOT", str(plugins_root))
+
+        command = "legacycli apply plugin partner/catalog/sample-plugin@1.0.0 -s"
+
+        assert _rewrite_nested_plugin_apply(command) == (
+            f'python -m templi.main apply plugin "{plugin_dir}" -s'
+        )
+
     def test_echo_command(self, tmp_path):
         exit_code = execute_run_hook(
             commands=["echo done"],

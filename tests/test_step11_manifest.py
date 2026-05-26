@@ -6,7 +6,7 @@ import pytest
 
 from templi.core.manifest_manager import load_global_inputs, update_manifest
 from templi.core.models import Plugin, PluginMetadata, PluginSpec
-from templi.core.runtime_config import COMPAT_NAME_ENV
+from templi.core.runtime_config import COMPAT_NAME_ENV, MANIFEST_DIR_ENV, MANIFEST_FILE_ENV
 
 
 def _make_plugin(name="test-plugin", version="1.0.0") -> Plugin:
@@ -30,8 +30,8 @@ class TestCreateManifest:
 
         path = update_manifest(str(tmp_path), _make_plugin(), {})
 
-        assert path == os.path.join(str(tmp_path), ".customtool", "manifest.yaml")
-        assert (tmp_path / ".customtool" / "manifest.yaml").exists()
+        assert path == os.path.join(str(tmp_path), ".customtool", "customtool.yaml")
+        assert (tmp_path / ".customtool" / "customtool.yaml").exists()
         assert not (tmp_path / ".templi").exists()
 
     def test_loads_globals_from_compat_manifest_directory(self, tmp_path, monkeypatch):
@@ -49,6 +49,25 @@ class TestCreateManifest:
             "ecosystem": "nodejs",
             "service_name": "api",
         }
+
+    def test_uses_configured_manifest_path_overrides(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(COMPAT_NAME_ENV, "CustomTool")
+        monkeypatch.setenv(MANIFEST_DIR_ENV, ".legacy-state")
+        monkeypatch.setenv(MANIFEST_FILE_ENV, "legacy-manifest.yaml")
+
+        path = update_manifest(
+            str(tmp_path),
+            _make_plugin(),
+            {},
+            global_inputs={"ecosystem": "python"},
+        )
+
+        assert path == os.path.join(
+            str(tmp_path),
+            ".legacy-state",
+            "legacy-manifest.yaml",
+        )
+        assert load_global_inputs(str(tmp_path)) == {"ecosystem": "python"}
 
     def test_rejects_invalid_compat_name(self, tmp_path, monkeypatch):
         monkeypatch.setenv(COMPAT_NAME_ENV, "custom-tool")

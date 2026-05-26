@@ -17,7 +17,7 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 # CA-06.1-3: Filtros customizados
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestKebabcase:
+class TestCaseKebabFilter:
     def test_pascal_case(self):
         assert kebabcase("MeuPlugin") == "meu-plugin"
 
@@ -102,8 +102,7 @@ class TestRenderDirectory:
         assert (target / ".gitkeep").exists()
 
     def test_merges_existing_file_paragraphs(self, tmp_path):
-        """When a template collides with an existing file, the renderer does a
-        paragraph-level merge (interleave), NOT a simple overwrite."""
+        """When a template collides with an existing file, the renderer interleaves paragraphs."""
         source = tmp_path / "templates"
         source.mkdir()
         (source / "app.txt").write_text("NEW-P1\n\nNEW-P2\n")
@@ -113,11 +112,42 @@ class TestRenderDirectory:
         (target / "app.txt").write_text("OLD-P1\n\nOLD-P2\n")
 
         render_templates_directory(str(source), str(target), {})
-        # Paragraphs are interleaved: new[0]+old[0], new[1]+old[1]
         assert (target / "app.txt").read_text() == "NEW-P1\nOLD-P1\n\nNEW-P2\nOLD-P2\n"
 
-    def test_overwrites_existing_when_new_empty(self, tmp_path):
-        """Empty template content writes empty file (no merge)."""
+    def test_unequal_paragraph_count_interleaves_from_start(self, tmp_path):
+        """When paragraph counts differ, preserve the existing lead paragraph."""
+        source = tmp_path / "templates"
+        source.mkdir()
+        (source / "readme.md").write_text("## Jinja\n\nYou can use jinja.\n")
+
+        target = tmp_path / "output"
+        target.mkdir()
+        (target / "readme.md").write_text("# parity mock\n")
+
+        render_templates_directory(str(source), str(target), {})
+        assert (target / "readme.md").read_text() == (
+            "# parity mock\n## Jinja\n\nYou can use jinja.\n"
+        )
+
+    def test_subset_template_preserves_existing_file(self, tmp_path):
+        """When every template line already exists in the file, keep the existing file."""
+        source = tmp_path / "templates"
+        source.mkdir()
+        (source / "app.cs").write_text("using System;\n\npublic class App\n{\n}\n")
+
+        target = tmp_path / "output"
+        target.mkdir()
+        (target / "app.cs").write_text(
+            "using System;\nusing System.Linq;\n\npublic class App\n{\n}\n",
+        )
+
+        render_templates_directory(str(source), str(target), {})
+        assert (target / "app.cs").read_text() == (
+            "using System;\nusing System.Linq;\n\npublic class App\n{\n}\n"
+        )
+
+    def test_empty_template_preserves_existing_file(self, tmp_path):
+        """Empty template must not wipe an existing file."""
         source = tmp_path / "templates"
         source.mkdir()
         (source / "app.js").write_text("")
@@ -127,7 +157,7 @@ class TestRenderDirectory:
         (target / "app.js").write_text("// ANTIGO")
 
         render_templates_directory(str(source), str(target), {})
-        assert (target / "app.js").read_text() == ""
+        assert (target / "app.js").read_text() == "// ANTIGO"
 
     def test_returns_created_files(self, tmp_path):
         source = tmp_path / "templates"

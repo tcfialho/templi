@@ -255,7 +255,7 @@ class TestPluginGeneratorLike:
 # CA-02.9: plugin-kafka-like (v2, text+items→select, computed scenario, repository)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestKafkaLikePlugin:
+class TestPluginKafkaLike:
     PLUGIN_DIR = os.path.join(FIXTURES_DIR, "plugin-kafka-like")
 
     def test_schema_version_v2(self):

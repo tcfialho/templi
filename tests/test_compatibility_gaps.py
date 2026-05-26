@@ -21,7 +21,7 @@ class TestInsertNegativeLines:
     """Testa inserção em linhas negativas contando do final."""
 
     def test_insert_line_minus_2(self, tmp_path):
-        """line: -2 = antes da penúltima linha."""
+        """line: -2 = antes da penúltima linha (contando linhas em branco)."""
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / "file.cs").write_text(
@@ -32,11 +32,10 @@ class TestInsertNegativeLines:
         execute_edit_hook("file.cs", changes, str(tmp_path), str(project_dir), {})
 
         lines = (project_dir / "file.cs").read_text().splitlines()
-        # 4 linhas originais + 1 inserida = 5 linhas
         assert len(lines) == 5
-        # INSERIDO deve estar antes da penúltima (linha4)
-        assert lines[-2] == "INSERIDO"
-        assert lines[-1] == "linha4"
+        assert lines[2] == "INSERIDO"
+        assert lines[3] == "linha3"
+        assert lines[4] == "linha4"
 
     def test_insert_line_minus_2_with_guard(self, tmp_path):
         """line: -2 com when.not-exists deve ser idempotente."""
@@ -73,11 +72,39 @@ class TestInsertNegativeLines:
 
         lines = (project_dir / "file.txt").read_text().splitlines()
         assert "X" in lines
-        # -3 com 5 linhas: target_index = max(5 + (-3) + 1, 0) = 3
-        # Insere na posição 3 (entre C e D)
+        # -3 com 5 linhas: target_index = max(5 + (-3), 0) = 2 (antes da 3ª linha, C)
         x_index = lines.index("X")
-        d_index = lines.index("D")
-        assert x_index == d_index - 1
+        c_index = lines.index("C")
+        assert x_index == c_index - 1
+
+    def test_insert_line_minus_1_blank_section_after_trailing_newline(self, tmp_path):
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "README.md").write_text(
+            "Existing paragraph.\n",
+            encoding="utf-8",
+        )
+
+        changes = [HookChange(insert_line=-1, insert_value="\n## Section\n")]
+        execute_edit_hook("README.md", changes, str(tmp_path), str(project_dir), {})
+
+        assert (project_dir / "README.md").read_text() == (
+            "Existing paragraph.\n\n## Section\n"
+        )
+
+    def test_insert_line_minus_1_no_blank_when_content_has_no_trailing_newline(
+        self, tmp_path,
+    ):
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "setup.ts").write_text("import 'jest-dom';", encoding="utf-8")
+
+        changes = [HookChange(insert_line=-1, insert_value="\nimport { server } from './server';\n")]
+        execute_edit_hook("setup.ts", changes, str(tmp_path), str(project_dir), {})
+
+        assert (project_dir / "setup.ts").read_text() == (
+            "import 'jest-dom';\nimport { server } from './server';\n"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
