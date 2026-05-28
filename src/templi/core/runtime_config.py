@@ -7,20 +7,15 @@ import re
 
 
 COMPAT_NAME_ENV = "TEMPLI_COMPAT_NAME"
-APPLY_PLUGIN_COMMAND_ENV = "TEMPLI_APPLY_PLUGIN_COMMAND"
 ENV_PREFIX_ENV = "TEMPLI_ENV_PREFIX"
 MANIFEST_DIR_ENV = "TEMPLI_MANIFEST_DIR"
 MANIFEST_FILE_ENV = "TEMPLI_MANIFEST_FILE"
-PLUGIN_DIRECTORY_PREFIX_ENV = "TEMPLI_PLUGIN_DIRECTORY_PREFIX"
-PLUGIN_NAMESPACE_ENV = "TEMPLI_PLUGIN_NAMESPACE"
-PLUGINS_ROOT_ENV_NAME_ENV = "TEMPLI_PLUGINS_ROOT_ENV"
 DEFAULT_ENV_PREFIX = "TEMPLI"
 DEFAULT_MANIFEST_DIR = ".templi"
 DEFAULT_MANIFEST_FILE = "manifest.yaml"
 
 _COMPAT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_PLUGIN_NAMESPACE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 def get_manifest_dir() -> str:
@@ -80,46 +75,6 @@ def get_manifest_file_candidates() -> tuple[str, ...]:
     return (manifest_file, DEFAULT_MANIFEST_FILE)
 
 
-def get_apply_plugin_command_aliases() -> tuple[str, ...]:
-    """Retorna os comandos reconhecidos para apply plugin."""
-    aliases = [
-        f"{get_runtime_name().lower()} apply plugin",
-        "python -m templi.main apply plugin",
-    ]
-    command_alias = _get_optional_env_value(APPLY_PLUGIN_COMMAND_ENV)
-    if command_alias is not None:
-        aliases.insert(0, command_alias)
-    return tuple(dict.fromkeys(aliases))
-
-
-def get_plugins_root_env_name() -> str:
-    """Retorna a env var que aponta para a raiz local de plugins."""
-    env_name = _get_optional_env_value(PLUGINS_ROOT_ENV_NAME_ENV)
-    if env_name is not None:
-        _validate_env_name(env_name, PLUGINS_ROOT_ENV_NAME_ENV)
-        return env_name
-
-    return build_runtime_env_name("PLUGINS_ROOT")
-
-
-def get_plugin_directory_family() -> str:
-    """Retorna o prefixo esperado em familias de diretorios de plugins."""
-    directory_prefix = _get_optional_env_value(PLUGIN_DIRECTORY_PREFIX_ENV)
-    if directory_prefix is not None:
-        return directory_prefix.lower()
-
-    return get_runtime_name().lower()
-
-
-def get_plugin_namespace() -> str:
-    """Retorna o namespace remoto configurado para referencias de plugin."""
-    namespace = _get_optional_env_value(PLUGIN_NAMESPACE_ENV)
-    if namespace is None:
-        return get_runtime_name().lower()
-
-    _validate_plugin_namespace(namespace)
-    return namespace
-
 
 def _get_optional_env_value(env_name: str) -> str | None:
     raw_value = os.getenv(env_name)
@@ -165,11 +120,3 @@ def _validate_env_name(env_name: str, source_env: str) -> None:
     )
 
 
-def _validate_plugin_namespace(namespace: str) -> None:
-    if _PLUGIN_NAMESPACE_PATTERN.fullmatch(namespace):
-        return
-
-    raise ValueError(
-        f"{PLUGIN_NAMESPACE_ENV} deve iniciar com letra e conter apenas letras, "
-        "numeros, hifen e underscore."
-    )

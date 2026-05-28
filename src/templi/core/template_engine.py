@@ -222,6 +222,7 @@ def _merge_paragraph_blocks(
 
 def _merge_template_contents(new_content: str, old_content: str) -> str:
     """Interleave template paragraphs with existing file paragraphs."""
+
     if not old_content.strip():
         return new_content
     if not new_content.strip():

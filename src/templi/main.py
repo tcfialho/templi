@@ -12,6 +12,7 @@ from templi.cli.printer import (
     print_error,
     print_warning_outside_workspace,
 )
+from templi.core.plugin_ref import resolve_plugin_directory
 
 
 @click.group()
@@ -42,43 +43,56 @@ def apply():
     help="Aplica plugins requeridos automaticamente.",
 )
 @click.option(
-    "--no-update-manifest",
-    is_flag=True,
-    hidden=True,
-    help="Não registra o plugin no manifesto local (applies aninhados via hook run).",
+    "--subpath",
+    default=None,
+    help="Subpasta do plugin dentro do caminho local ou do clone Git (monorepo).",
+)
+@click.option(
+    "--git-ref",
+    default=None,
+    help="Branch ou tag ao clonar repositório Git (NAME_OR_PATH como URL).",
 )
 @click.pass_context
-def apply_plugin(ctx, name_or_path, skip_warning, non_interactive, inputs_json, automatic_apply_requirements, no_update_manifest):
+def apply_plugin(
+    ctx,
+    name_or_path,
+    skip_warning,
+    non_interactive,
+    inputs_json,
+    automatic_apply_requirements,
+    subpath,
+    git_ref,
+):
     """Aplica um plugin ao projeto atual.
 
-    NAME_OR_PATH é o caminho para o diretório do plugin contendo plugin.yaml.
+    NAME_OR_PATH é pasta local com plugin.yaml ou URL de repositório Git.
     """
     try:
         cli_inputs = parse_extra_args(ctx.args)
         if inputs_json:
             cli_inputs.update(parse_inputs_json(inputs_json))
 
-        plugin_yaml_path = os.path.join(name_or_path, "plugin.yaml")
-        if not os.path.isfile(plugin_yaml_path):
-            raise FileNotFoundError(
-                f"Arquivo plugin.yaml não encontrado em {name_or_path}"
-            )
+        plugin_dir = resolve_plugin_directory(
+            name_or_path,
+            subpath=subpath,
+            git_ref=git_ref,
+        )
 
         if not skip_warning:
             print_warning_outside_workspace()
 
-        print_applying(name_or_path)
+        print_applying(plugin_dir)
 
         from templi.core.orchestrator import apply_plugin as do_apply
+
         do_apply(
-            plugin_dir=name_or_path,
+            plugin_dir=plugin_dir,
             project_dir=os.getcwd(),
             cli_inputs=cli_inputs,
             is_non_interactive=non_interactive,
-            persist_manifest=not no_update_manifest,
         )
 
-        print_applied(name_or_path)
+        print_applied(plugin_dir)
 
     except (FileNotFoundError, ValueError, RuntimeError) as error:
         print_error(str(error))

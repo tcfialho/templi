@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from templi.core.manifest_lock import is_manifest_write_locked
 from templi.core.models import Plugin
 from templi.core.runtime_config import (
     get_manifest_dir,
@@ -163,6 +164,9 @@ def update_manifest(
     manifest_file = get_manifest_file()
     manifest_path = os.path.join(manifest_dir, manifest_file)
     ensure_directory(manifest_dir)
+
+    if is_manifest_write_locked(project_dir):
+        return manifest_path
 
     existing_manifest = _load_existing_manifest(manifest_path)
     is_configured_mode = _is_configured_compat_mode()

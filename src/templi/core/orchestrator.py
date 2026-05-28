@@ -10,6 +10,7 @@ from templi.cli.printer import print_warning
 from templi.core.computed_resolver import resolve_computed_inputs
 from templi.core.condition_evaluator import evaluate_condition
 from templi.core.input_collector import collect_inputs
+from templi.core.manifest_lock import manifest_write_lock
 from templi.core.manifest_manager import load_global_layers, update_manifest
 from templi.core.models import Hook, Plugin
 from templi.core.plugin_loader import load_plugin
@@ -61,7 +62,8 @@ def apply_plugin(
     project_dir: str,
     cli_inputs: dict[str, str] | None = None,
     is_non_interactive: bool = False,
-    persist_manifest: bool = True,
+    *,
+    write_manifest: bool = True,
 ) -> dict[str, Any]:
     """
     Pipeline completo de aplicação de um plugin.
@@ -135,25 +137,26 @@ def apply_plugin(
         all_variables=all_variables,
     )
 
-    _execute_hooks_by_trigger(
-        hooks=plugin.spec.hooks,
-        trigger="before-render",
-        plugin=plugin,
-        project_dir=project_dir,
-        state=state,
-    )
+    with manifest_write_lock(project_dir):
+        _execute_hooks_by_trigger(
+            hooks=plugin.spec.hooks,
+            trigger="before-render",
+            plugin=plugin,
+            project_dir=project_dir,
+            state=state,
+        )
 
-    templates_dir = os.path.join(plugin.source_directory, "templates")
-    if os.path.isdir(templates_dir):
-        render_templates_directory(templates_dir, project_dir, state.all_variables)
+        templates_dir = os.path.join(plugin.source_directory, "templates")
+        if os.path.isdir(templates_dir):
+            render_templates_directory(templates_dir, project_dir, state.all_variables)
 
-    _execute_hooks_by_trigger(
-        hooks=plugin.spec.hooks,
-        trigger="after-render",
-        plugin=plugin,
-        project_dir=project_dir,
-        state=state,
-    )
+        _execute_hooks_by_trigger(
+            hooks=plugin.spec.hooks,
+            trigger="after-render",
+            plugin=plugin,
+            project_dir=project_dir,
+            state=state,
+        )
 
     manifest_inputs = {
         key: value for key, value in state.inputs.items()
@@ -162,7 +165,7 @@ def apply_plugin(
 
     manifest_computed = None if plugin.is_legacy_yaml else state.global_computed_inputs
 
-    if persist_manifest:
+    if write_manifest:
         update_manifest(
             project_dir, plugin, manifest_inputs,
             global_inputs=state.global_inputs,
@@ -247,11 +250,13 @@ def _execute_single_hook(
         return
 
     if hook.type == "run" and hook.commands:
-        execute_run_hook(
+        exit_code = execute_run_hook(
             commands=hook.commands,
             project_dir=project_dir,
             variables=state.all_variables,
         )
+        if exit_code != 0:
+            raise RuntimeError(f"Hook run falhou (exit {exit_code})")
         return
 
     print_warning(f"Hook tipo '{hook.type}' não suportado ou configuração incompleta")
