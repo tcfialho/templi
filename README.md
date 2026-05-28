@@ -1,57 +1,58 @@
-# Templi (Python Implementation)
+# Templi
 
-Uma implementação em Python para aplicar plugins YAML em projetos.
+Implementação Python do motor de plugins YAML. Aplica um plugin num projeto, renderiza templates e executa hooks.
 
-## Funcionalidades
-*   Compatível com schema v2 e v3 de plugins YAML.
-*   **Fallback V2:** Detecta e renderiza automaticamente `templates/` para plugins legados sem hooks.
-*   **Script Runner:** Executa scripts Python usando um mock de `templateframework` para compatibilidade com plugins legados.
-*   Suporta hooks: `run-script`, `render-templates`, `edit`.
-*   Suporta inputs interativos e não-interativos.
-*   Validação de compatibilidade com plugins legados e fixtures completas.
-*   Correções de lacunas como `line: -N` e `replace-by: snippet`.
+## Uso básico
 
-## Como Usar
+Pasta local:
 
-### 1. Aplicar Plugin
-```bash
-python -m templi.main apply plugin "c:\caminho\para\o\plugin"
+```powershell
+python -m templi.main apply plugin "C:\caminho\do\plugin"
 ```
 
-### 2. Opções CLI
-*   `-s`, `--skip-warning`: Ignorar aviso de workspace.
-*   `-q`, `--non-interactive`: Modo não interativo (requer inputs via linha de comando ou JSON).
-*   `--input-name valor`: Passar inputs diretamente.
-*   `--inputs-json '{"key": "value"}'`: Passar inputs em JSON.
+Repositório Git (clone em cache, branch/tag opcional):
 
-### 3. Nome de Compatibilidade
-Por padrão, o Templi mantém o estado local em `.templi/manifest.yaml` e injeta as variáveis de runtime `TEMPLI_PLUGIN_DIR` e `TEMPLI_PROJECT_DIR` em hooks `run-script`.
-
-Para compatibilidade com outro nome de runtime, defina `TEMPLI_COMPAT_NAME`. Quando configurado, o valor é usado em minúsculas para o diretório local e em maiúsculas para o prefixo das variáveis de ambiente:
-
-```bash
-TEMPLI_COMPAT_NAME=minha_ferramenta
+```powershell
+python -m templi.main apply plugin "https://github.com/org/repo-plugins" `
+  --subpath dot-net/my-plugin-api-rest --git-ref main -q -s
 ```
 
-Resultado:
+| Flag | O que faz |
+|---|---|
+| `-q` | não interativo (usa defaults ou `--inputs-json`) |
+| `-s` | ignora aviso de workspace |
+| `--inputs-json '{"chave":"valor"}'` | passa inputs sem prompt |
+| `--subpath` | pasta do plugin dentro do clone ou do caminho local (monorepo) |
+| `--git-ref` | branch ou tag no repositório remoto |
 
-```text
-.minha_ferramenta/manifest.yaml
-MINHA_FERRAMENTA_PLUGIN_DIR
-MINHA_FERRAMENTA_PROJECT_DIR
+Clone em cache fixo: `%USERPROFILE%\.cache\templi\plugins\`. A cada apply o Templi atualiza o cache via **Dulwich** (biblioteca Python — clone/fetch sem `git` no PATH). Use URL **HTTPS** do repositório.
+
+Repositórios privados reutilizam o mesmo login do Git: o Templi chama `git credential fill` (respeita `credential.helper` — GCM no Windows, osxkeychain no macOS, libsecret/store no Linux). Se `git` não estiver instalado, tenta `~/.git-credentials` / XDG (`credential.helper store`). Não é necessário PAT na URL.
+
+## Chamando outro plugin dentro de um hook `run`
+
+O hook `run` executa a linha no shell (`python -m templi.main`, etc.) — sem tratamento especial no Templi. Se o comando falhar, o apply do plugin pai é interrompido.
+
+Exemplo com pasta local ou URL Git (o subprocesso do filho usa o mesmo resolvedor de plugin):
+
+```yaml
+- python -m templi.main apply plugin "https://github.com/org/plugin-x" --git-ref main -s -q --project_name '{{project_name}}'
 ```
 
-Se `TEMPLI_COMPAT_NAME` não existir ou estiver vazio, o comportamento padrão continua sendo `.templi/` e `TEMPLI_*`. O valor deve começar com letra e conter apenas letras, números ou `_`.
+Durante os hooks, o Templi mantém `.templi/manifest.lock` (ou `.compat/manifest.lock` em modo compat). Subprocessos que chamam `templi apply` no mesmo projeto não gravam o manifesto até o lock ser liberado; o apply pai grava uma vez no fim. Lock órfão (crash) é removido automaticamente se o PID dono não existir mais ou após 4 horas.    
 
-### 4. Executar Testes
-```bash
+**Migrando de outro runtime:** referências `company/...` no YAML continuam exigindo o CLI de referência no PATH, ou reescreva para caminho/URL explícitos.
+## Emulando outro runtime (OSK)
+
+> **OSK** (*Other Stack*) = runtime CLI externo de referência. Só muda onde o Templi grava estado.
+
+| Variável | Para quê |
+|---|---|
+| `TEMPLI_COMPAT_NAME=osk` | usa `.osk/osk.yaml` em vez de `.templi/manifest.yaml` |
+| `PYTHONPATH=C:\...\Templi\src` | se `templi` não estiver instalado via pip |
+
+## Testes
+
+```powershell
 python -m pytest tests/
 ```
-
-## Estrutura do Projeto
-*   `src/templi`: Código fonte.
-*   `tests`: Testes automatizados (237 testes).
-*   `specs`: Especificações detalhadas.
-
-## Relatórios de Compatibilidade
-Consulte `COMPATIBILITY_REPORT.md` e `FINAL_COMPATIBILITY_REPORT.md` na raiz do workspace para detalhes sobre a cobertura de funcionalidades.
