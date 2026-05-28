@@ -45,6 +45,7 @@ ENV/
 .temp/
 temp/
 tmp/
+*.patch
 
 # IDE and OS metadata
 .idea/
