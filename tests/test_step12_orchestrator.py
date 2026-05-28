@@ -256,6 +256,39 @@ spec:
         # Manifesto deve existir
         assert os.path.isfile(os.path.join(project_dir, ".templi", "manifest.yaml"))
 
+    def test_run_hook_failure_aborts_before_manifest(self, tmp_path):
+        plugin_dir = os.path.join(str(tmp_path), "run-fail-plugin")
+        os.makedirs(plugin_dir)
+        plugin_yaml = """schema-version: v3
+kind: plugin
+metadata:
+  name: test-run-fail
+  display-name: Test Run Fail
+  description: Plugin whose run hook fails
+  version: 1.0.0
+spec:
+  type: app
+  inputs: []
+  hooks:
+    - type: run
+      trigger: after-render
+      commands:
+        - exit 1
+"""
+        write_file(os.path.join(plugin_dir, "plugin.yaml"), plugin_yaml)
+        project_dir = os.path.join(str(tmp_path), "project")
+        os.makedirs(project_dir)
+
+        with pytest.raises(RuntimeError, match="Hook run falhou"):
+            apply_plugin(
+                plugin_dir=plugin_dir,
+                project_dir=project_dir,
+                cli_inputs={},
+                is_non_interactive=True,
+            )
+
+        assert not os.path.isfile(os.path.join(project_dir, ".templi", "manifest.yaml"))
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CA-12.5: plugin-generator-like — pipeline completo (templates + hooks + manifest)
